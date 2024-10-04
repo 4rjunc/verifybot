@@ -137,8 +137,8 @@ def start(message):
     return
 
 
-# Dictionary to keep track of message IDs for each verifier group
-verifier_group_message_ids = {}
+# Dictionary to keep track of message IDs for each verifier group per receipt
+verifier_group_message_ids = {}  # Key: original_message_id, Value: {group_id: list of message_ids}
 
 
 @bot.message_handler(content_types=["photo"])
@@ -151,9 +151,8 @@ def handle_photo(message):
         )
         return
     chat_id = message.chat.id  # Dynamically capture the chat ID of the group
-    verifyer_chat_id = -1002340040662
     photo = message.photo[-1].file_id  # Get the highest resolution photo
-    message_id = message.message_id
+    message_id = message.message_id  # ID of the original message
 
     keyboard = InlineKeyboardMarkup()
     received_btn = InlineKeyboardButton(
@@ -165,7 +164,10 @@ def handle_photo(message):
     keyboard.add(received_btn)
     keyboard.add(nreceived_btn)
 
-    # Send the photo back to the user
+    # Track the message IDs in verifier groups for this original message
+    verifier_group_message_ids[message_id] = {}
+
+    # Send the photo to all verifier groups and store the message IDs
     for group_id in verifier_group_ids:
         send_message = bot.send_photo(
             group_id,
@@ -173,7 +175,8 @@ def handle_photo(message):
             caption="Please verify the payment.",
             reply_markup=keyboard,
         )
-        verifier_group_message_ids[group_id] = send_message.message_id
+        # Append the sent message ID to the list for this group, for this specific receipt
+        verifier_group_message_ids[message_id][group_id] = send_message.message_id
 
 
 # Handle the button click with callback_data
@@ -192,18 +195,21 @@ def handle_callback_query(call):
             InlineKeyboardButton(text="✅ Payment Verified", callback_data="noop")
         )
 
-        # Update the inline keyboard in all verifier groups
-        for group_id in verifier_group_ids:
-            try:
-                group_message_id = verifier_group_message_ids.get(group_id)
-                if group_message_id:
+        # Update the inline keyboard in all verifier groups for the specific receipt
+        if original_message_id in verifier_group_message_ids:
+            for group_id, group_message_id in verifier_group_message_ids[
+                original_message_id
+            ].items():
+                try:
                     bot.edit_message_reply_markup(
                         chat_id=group_id,
                         message_id=group_message_id,
                         reply_markup=new_keyboard,
                     )
-            except Exception as e:
-                logger.error(f"Error updating inline keyboard in group {group_id}: {e}")
+                except Exception as e:
+                    logger.error(
+                        f"Error updating inline keyboard in group {group_id}: {e}"
+                    )
 
         # Notify the original group that payment was verified
         bot.send_message(
@@ -216,23 +222,26 @@ def handle_callback_query(call):
             InlineKeyboardButton(text="❌ Payment Not Received", callback_data="noop")
         )
 
-        # Update the inline keyboard in all verifier groups
-        for group_id in verifier_group_ids:
-            try:
-                group_message_id = verifier_group_message_ids.get(group_id)
-                if group_message_id:
+        # Update the inline keyboard in all verifier groups for the specific receipt
+        if original_message_id in verifier_group_message_ids:
+            for group_id, group_message_id in verifier_group_message_ids[
+                original_message_id
+            ].items():
+                try:
                     bot.edit_message_reply_markup(
                         chat_id=group_id,
                         message_id=group_message_id,
                         reply_markup=new_keyboard,
                     )
-            except Exception as e:
-                logger.error(f"Error updating inline keyboard in group {group_id}: {e}")
+                except Exception as e:
+                    logger.error(
+                        f"Error updating inline keyboard in group {group_id}: {e}"
+                    )
 
         # Notify the original group that payment was not received
         bot.send_message(
             chat_id, "Payment Not Received ❌", reply_to_message_id=original_message_id
-        )  # Enable saving next step handlers to file "./.handlers-saves/step.save"
+        )
 
 
 bot.enable_save_next_step_handlers(delay=2)
