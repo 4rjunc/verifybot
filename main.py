@@ -1,13 +1,9 @@
 import logging
 import telebot
-from configuration.config import API_TOKEN
+import json
 import utils.logger as logger_save
-from telebot.util import update_types
+from configuration.config import API_TOKEN
 from telebot.types import (
-    InputFile,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ChatMemberUpdated,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
@@ -28,10 +24,105 @@ logger_save.init_logger(f"logs/botlog.log")
 # Initializing bot with 4 thread workers for handling multiple requests
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=4)
 
+verifier_group_ids = []  # Stores verifiers group ID
 
-# /gm command handler
+
+# Funtions to save verifier group ID in JSON file
+def save_verifier_group_id():
+    with open("verifier_config.json", "w") as file:
+        json.dump({"verifier_group_id": verifier_group_ids}, file)
+
+
+# Load the verifier group ID from a JSON file
+def load_verifier_group_id():
+    global verifier_group_id
+    try:
+        with open("verifier_config.json", "r") as file:
+            data = json.load(file)
+            verifier_group_id = data.get("verifier_group_id", None)
+    except (FileNotFoundError, json.JSONDecodeError):
+        verifier_group_id = None
+
+
+# Call this function at bot startup to load the group ID
+load_verifier_group_id()
+PASSKEY = "SETAPASSKEY"
+
+
+@bot.message_handler(commands=["setverifier"])
+def set_verifier_group(message):
+    global verifier_group_ids
+    chat_id = message.chat.id
+
+    # Check if the message is from a group chat
+    if message.chat.type == "group" or message.chat.type == "supergroup":
+        try:
+            # Extract passkey from the message (expected format: /setverifier <passkey>)
+            provided_passkey = message.text.split()[1]
+
+            # Validate the passkey
+            if provided_passkey == PASSKEY:
+                if chat_id not in verifier_group_ids:
+                    verifier_group_ids.append(chat_id)
+                    bot.reply_to(
+                        message, f"Group {chat_id} has been added as a verifier group."
+                    )
+                else:
+                    bot.reply_to(
+                        message, f"Group {chat_id} is already a verifier group."
+                    )
+            else:
+                bot.reply_to(
+                    message, "Invalid passkey. Please provide the correct passkey."
+                )
+        except IndexError:
+            bot.reply_to(
+                message, "Please provide a passkey after the /setverifier command."
+            )
+    else:
+        bot.reply_to(message, "This command can only be used in a group.")
+
+
+# Capture the group ID dynamically to remove it
+@bot.message_handler(commands=["removeverifier"])
+def remove_verifier_group(message):
+    global verifier_group_ids
+    chat_id = message.chat.id
+
+    # Check if the message is from a group chat
+    if message.chat.type == "group" or message.chat.type == "supergroup":
+        try:
+            # Extract passkey from the message (expected format: /removeverifier <passkey>)
+            provided_passkey = message.text.split()[1]
+
+            # Validate the passkey
+            if provided_passkey == PASSKEY:
+                if chat_id in verifier_group_ids:
+                    verifier_group_ids.remove(chat_id)
+                    bot.reply_to(
+                        message,
+                        f"Group {chat_id} has been removed from the verifier list.",
+                    )
+                else:
+                    bot.reply_to(
+                        message, f"Group {chat_id} is not in the verifier list."
+                    )
+            else:
+                bot.reply_to(
+                    message, "Invalid passkey. Please provide the correct passkey."
+                )
+        except IndexError:
+            bot.reply_to(
+                message, "Please provide a passkey after the /removeverifier command."
+            )
+    else:
+        bot.reply_to(message, "This command can only be used in a group.")
+
+
+# /start command handler
 @bot.message_handler(commands=["start"])
 def start(message):
+    save_verifier_group_id()
     username = message.from_user.username
     chat_id = message.chat.id
 
@@ -46,8 +137,19 @@ def start(message):
     return
 
 
+# Dictionary to keep track of message IDs for each verifier group
+verifier_group_message_ids = {}
+
+
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
+    global verifier_group_ids, verifier_group_message_ids
+
+    if not verifier_group_ids:
+        bot.reply_to(
+            message, "No verifier groups are set. Please set them using /setverifier."
+        )
+        return
     chat_id = message.chat.id  # Dynamically capture the chat ID of the group
     verifyer_chat_id = -1002340040662
     photo = message.photo[-1].file_id  # Get the highest resolution photo
@@ -64,55 +166,75 @@ def handle_photo(message):
     keyboard.add(nreceived_btn)
 
     # Send the photo back to the user
-    bot.send_photo(
-        verifyer_chat_id,
-        photo,
-        caption="Please verify the payment.",
-        reply_markup=keyboard,
-    )
+    for group_id in verifier_group_ids:
+        send_message = bot.send_photo(
+            group_id,
+            photo,
+            caption="Please verify the payment.",
+            reply_markup=keyboard,
+        )
+        verifier_group_message_ids[group_id] = send_message.message_id
 
 
 # Handle the button click with callback_data
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback_query(call):
+    global verifier_group_ids, verifier_group_message_ids
     data = call.data.split("|")
     action = data[0]
     chat_id = int(data[1])
-    message_id = int(data[2])
+    original_message_id = int(data[2])
 
+    # Prepare the new inline keyboard (no more buttons after decision)
     if action == "received":
-        # bot.send_message(chat_id, "Payment Verified ✅")
-        # Replacing the inline keyboard after receiving verifiers review
         new_keyboard = InlineKeyboardMarkup()
         new_keyboard.add(
             InlineKeyboardButton(text="✅ Payment Verified", callback_data="noop")
         )
-        bot.edit_message_reply_markup(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=new_keyboard,
+
+        # Update the inline keyboard in all verifier groups
+        for group_id in verifier_group_ids:
+            try:
+                group_message_id = verifier_group_message_ids.get(group_id)
+                if group_message_id:
+                    bot.edit_message_reply_markup(
+                        chat_id=group_id,
+                        message_id=group_message_id,
+                        reply_markup=new_keyboard,
+                    )
+            except Exception as e:
+                logger.error(f"Error updating inline keyboard in group {group_id}: {e}")
+
+        # Notify the original group that payment was verified
+        bot.send_message(
+            chat_id, "Payment Verified ✅", reply_to_message_id=original_message_id
         )
 
-        bot.send_message(chat_id, "Payment Verified ✅", reply_to_message_id=message_id)
-
-    if action == "nreceived":
-        # bot.send_message(chat_id, "Payment Not Received ❌")
-        # Replacing the inline keyboard after receiving verifiers review
+    elif action == "nreceived":
         new_keyboard = InlineKeyboardMarkup()
         new_keyboard.add(
             InlineKeyboardButton(text="❌ Payment Not Received", callback_data="noop")
         )
-        bot.edit_message_reply_markup(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=new_keyboard,
-        )
+
+        # Update the inline keyboard in all verifier groups
+        for group_id in verifier_group_ids:
+            try:
+                group_message_id = verifier_group_message_ids.get(group_id)
+                if group_message_id:
+                    bot.edit_message_reply_markup(
+                        chat_id=group_id,
+                        message_id=group_message_id,
+                        reply_markup=new_keyboard,
+                    )
+            except Exception as e:
+                logger.error(f"Error updating inline keyboard in group {group_id}: {e}")
+
+        # Notify the original group that payment was not received
         bot.send_message(
-            chat_id, "Payment Not Received ❌", reply_to_message_id=message_id
-        )
+            chat_id, "Payment Not Received ❌", reply_to_message_id=original_message_id
+        )  # Enable saving next step handlers to file "./.handlers-saves/step.save"
 
 
-# Enable saving next step handlers to file "./.handlers-saves/step.save"
 bot.enable_save_next_step_handlers(delay=2)
 
 # Load next step handlers from the save file
