@@ -31,7 +31,7 @@ bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=4)
 
 # /gm command handler
 @bot.message_handler(commands=["start"])
-def gm(message):
+def start(message):
     username = message.from_user.username
     chat_id = message.chat.id
 
@@ -46,27 +46,8 @@ def gm(message):
     return
 
 
-# Command to show the keyboard with an inline button
-@bot.message_handler(commands=["resp"])
-def reply(message):
-    chat_id = message.chat.id
-
-    # Create an Inline Keyboard with a button
-    keyboard = InlineKeyboardMarkup()
-    button = InlineKeyboardButton(text="Received", callback_data="received")
-
-    button2 = InlineKeyboardButton(text="Not Received ", callback_data="nreceived")
-    keyboard.add(button)
-    keyboard.add(button2)
-
-    bot.send_message(
-        chat_id, "Click the button to submit your info", reply_markup=keyboard
-    )
-
-
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
-    print("handle_photo message:", message)
     chat_id = message.chat.id  # Dynamically capture the chat ID of the group
     verifyer_chat_id = -1002340040662
     photo = message.photo[-1].file_id  # Get the highest resolution photo
@@ -98,8 +79,6 @@ def handle_callback_query(call):
     action = data[0]
     chat_id = int(data[1])
     message_id = int(data[2])
-
-    print("handle_callback_query call:", call)
 
     if action == "received":
         # bot.send_message(chat_id, "Payment Verified ✅")
