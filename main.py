@@ -1,17 +1,29 @@
 import logging
+import requests
 import telebot
 import json
+import cv2
+import re
+import numpy as np
 import utils.logger as logger_save
 from configuration.config import API_TOKEN
 from telebot.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
+import io  # For in-memory operations
+import pytesseract
+from PIL import Image, ImageFilter, ImageDraw
+import queue
+import threading
+import time
 
 # dynamic group id message forwarding ✅
 # change the inline keyboard after revewing ✅
 # get the payment verifyed message reply to the recipt image messsage ✅
-# setting verifyer group and payment group
+# setting verifyer group and payment group ✅
+# auto blur images ✅
+# stress test
 
 # Configuring logging
 logging.basicConfig(level=logging.INFO)
@@ -141,18 +153,125 @@ def start(message):
 verifier_group_message_ids = {}  # Key: original_message_id, Value: {group_id: list of message_ids}
 
 
+# Create a queue for processing images
+image_processing_queue = queue.Queue()
+
+
+def image_processing_worker():
+    while True:
+        message = image_processing_queue.get()
+        if message is None:
+            break  # Exit the loop if None is sent to the queue
+        try:
+            handle_image(message)  # Call a function to handle the image processing
+        finally:
+            image_processing_queue.task_done()
+
+
+# Start a thread to process images
+worker_thread = threading.Thread(target=image_processing_worker)
+worker_thread.start()
+
+
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
-    global verifier_group_ids, verifier_group_message_ids
+    global verifier_group_ids
 
     if not verifier_group_ids:
         bot.reply_to(
             message, "No verifier groups are set. Please set them using /setverifier."
         )
         return
-    chat_id = message.chat.id  # Dynamically capture the chat ID of the group
+
+    # Enqueue the message for processing
+    image_processing_queue.put(message)
+
+
+# Function to automatically blur text in the image using OCR
+def detect_and_blur_sensitive_info(image):
+    # Convert the PIL image to a format OpenCV can work with
+    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+    # Perform OCR with bounding box info
+    data = pytesseract.image_to_data(image_cv, output_type=pytesseract.Output.DICT)
+
+    # Sensitive patterns for text detection
+    sensitive_patterns = [
+        r"\b₹?\d{1,3}(,\d{3})*(\.\d{2})?\b",  # Amount pattern (e.g., ₹50,000.00)
+        r"\d+[A-Za-z]*|\b[A-Za-z]+\d+\b",  # Alphanumeric strings
+        r"\b[A-Z]\b\s[A-Z][a-z]+\b",  # Name pattern: initial and last name (e.g., "M Sahad")
+    ]
+
+    # Iterate through the OCR results
+    for i in range(len(data["text"])):
+        text = data["text"][i].strip()  # Remove extra spaces
+
+        # Skip if the text is empty or too short (usually irrelevant)
+        if text == "" or len(text) < 2:
+            continue
+
+        print("text:", text)  # For debugging to see OCR text
+
+        # Check if the text matches any sensitive pattern or is an email-like string
+        if not any(
+            re.search(pattern, text) for pattern in sensitive_patterns
+        ) or re.match(r"^\d{10}@[A-Za-z]+$", text):
+            # Get bounding box coordinates
+            print("text to blur: ", text)
+            x = data["left"][i]
+            y = data["top"][i]
+            w = data["width"][i]
+            h = data["height"][i]
+
+            # Extract the region of interest (ROI)
+            roi = image_cv[y : y + h, x : x + w]
+
+            # Apply Gaussian blur to the ROI
+            blurred_roi = cv2.GaussianBlur(roi, (23, 23), 30)
+
+            # Replace the original region with the blurred one
+            image_cv[y : y + h, x : x + w] = blurred_roi
+
+    # Convert back to PIL format
+    return Image.fromarray(cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB))
+
+
+def handle_image(message):
+    chat_id = message.chat.id
     photo = message.photo[-1].file_id  # Get the highest resolution photo
     message_id = message.message_id  # ID of the original message
+
+    # Ensure the message_id key is initialized in the verifier_group_message_ids dictionary
+    if message_id not in verifier_group_message_ids:
+        verifier_group_message_ids[message_id] = {}
+
+    # Use the file_id to get the photo
+    photo_file = bot.get_file(photo)
+
+    # Retry logic
+    for attempt in range(3):  # Try 3 times
+        try:
+            photo_bytes = bot.download_file(photo_file.file_path)
+            break  # Exit loop if successful
+        except requests.exceptions.ConnectionError:
+            if attempt < 2:  # If not the last attempt
+                time.sleep(1)  # Delay before retrying
+            else:
+                bot.reply_to(
+                    message, "Failed to download the photo. Please try again later."
+                )
+                return
+
+    # Open the image using PIL directly from bytes
+    image = Image.open(io.BytesIO(photo_bytes))
+
+    # Call the function to blur sensitive info
+    processed_image = detect_and_blur_sensitive_info(image)
+
+    # Save the processed image to a BytesIO object
+    img_byte_arr = io.BytesIO()
+    processed_image.save(img_byte_arr, format="JPEG")
+    img_byte_arr.seek(0)
 
     keyboard = InlineKeyboardMarkup()
     received_btn = InlineKeyboardButton(
@@ -164,19 +283,19 @@ def handle_photo(message):
     keyboard.add(received_btn)
     keyboard.add(nreceived_btn)
 
-    # Track the message IDs in verifier groups for this original message
-    verifier_group_message_ids[message_id] = {}
-
-    # Send the photo to all verifier groups and store the message IDs
+    # Send the processed photo to all verifier groups
     for group_id in verifier_group_ids:
-        send_message = bot.send_photo(
-            group_id,
-            photo,
-            caption="Please verify the payment.",
-            reply_markup=keyboard,
-        )
-        # Append the sent message ID to the list for this group, for this specific receipt
-        verifier_group_message_ids[message_id][group_id] = send_message.message_id
+        try:
+            send_message = bot.send_photo(
+                group_id,
+                img_byte_arr.getvalue(),  # Use the byte array of the processed image
+                caption="Please verify the payment.",
+                reply_markup=keyboard,
+            )
+            # Store the message_id in the verifier_group_message_ids dictionary
+            verifier_group_message_ids[message_id][group_id] = send_message.message_id
+        except Exception as e:
+            logger.error(f"Error sending message to group {group_id}: {e}")
 
 
 # Handle the button click with callback_data
