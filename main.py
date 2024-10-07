@@ -198,7 +198,7 @@ def detect_and_blur_sensitive_info(image):
     # Sensitive patterns for text detection
     sensitive_patterns = [
         r"\b₹?\d{1,3}(,\d{3})*(\.\d{2})?\b",  # Amount pattern (e.g., ₹50,000.00)
-        r"\d+[A-Za-z]*|\b[A-Za-z]+\d+\b",  # Alphanumeric strings
+        r"\d+[A-Za-z]*|\b[A-Za-z]+\d+\b",  # Pattern for alphanumeric strings
         r"\b[A-Z]\b\s[A-Z][a-z]+\b",  # Name pattern: initial and last name (e.g., "M Sahad")
     ]
 
@@ -213,9 +213,9 @@ def detect_and_blur_sensitive_info(image):
         print("text:", text)  # For debugging to see OCR text
 
         # Check if the text matches any sensitive pattern or is an email-like string
-        if not any(
-            re.search(pattern, text) for pattern in sensitive_patterns
-        ) or re.match(r"^\d{10}@[A-Za-z]+$", text):
+        if (
+            not any(re.search(pattern, text) for pattern in sensitive_patterns)
+        ) or re.match(r"^\d{10}@.+$", text):
             # Get bounding box coordinates
             print("text to blur: ", text)
             x = data["left"][i]
