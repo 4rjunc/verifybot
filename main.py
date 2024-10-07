@@ -58,7 +58,7 @@ def load_verifier_group_id():
 
 # Call this function at bot startup to load the group ID
 load_verifier_group_id()
-PASSKEY = "SETAPASSKEY"
+PASSKEY = "r?eG6c06$Ms="
 
 
 @bot.message_handler(commands=["setverifier"])
