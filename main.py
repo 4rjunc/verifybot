@@ -154,37 +154,39 @@ verifier_group_message_ids = {}  # Key: original_message_id, Value: {group_id: l
 
 
 # Create a queue for processing images
-image_processing_queue = queue.Queue()
+# image_processing_queue = queue.Queue()
+#
+#
+# def image_processing_worker():
+#     while True:
+#         message = image_processing_queue.get()
+#         if message is None:
+#             break  # Exit the loop if None is sent to the queue
+#         try:
+#             handle_image(message)  # Call a function to handle the image processing
+#         finally:
+#             image_processing_queue.task_done()
+#
+#
+# # Start a thread to process images
+# worker_thread = threading.Thread(target=image_processing_worker)
+# worker_thread.start()
+#
 
 
-def image_processing_worker():
-    while True:
-        message = image_processing_queue.get()
-        if message is None:
-            break  # Exit the loop if None is sent to the queue
-        try:
-            handle_image(message)  # Call a function to handle the image processing
-        finally:
-            image_processing_queue.task_done()
-
-
-# Start a thread to process images
-worker_thread = threading.Thread(target=image_processing_worker)
-worker_thread.start()
-
-
-@bot.message_handler(content_types=["photo"])
-def handle_photo(message):
-    global verifier_group_ids
-
-    if not verifier_group_ids:
-        bot.reply_to(
-            message, "No verifier groups are set. Please set them using /setverifier."
-        )
-        return
-
-    # Enqueue the message for processing
-    image_processing_queue.put(message)
+# @bot.message_handler(content_types=["photo"])
+# def handle_photo(message):
+#     global verifier_group_ids
+#
+#     if not verifier_group_ids:
+#         bot.reply_to(
+#             message, "No verifier groups are set. Please set them using /setverifier."
+#         )
+#         return
+#
+#     # Enqueue the message for processing
+#     image_processing_queue.put(message)
+#
 
 
 # Function to automatically blur text in the image using OCR
@@ -236,42 +238,18 @@ def detect_and_blur_sensitive_info(image):
     return Image.fromarray(cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB))
 
 
-def handle_image(message):
-    chat_id = message.chat.id
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    global verifier_group_ids, verifier_group_message_ids
+
+    if not verifier_group_ids:
+        bot.reply_to(
+            message, "No verifier groups are set. Please set them using /setverifier."
+        )
+        return
+    chat_id = message.chat.id  # Dynamically capture the chat ID of the group
     photo = message.photo[-1].file_id  # Get the highest resolution photo
     message_id = message.message_id  # ID of the original message
-
-    # Ensure the message_id key is initialized in the verifier_group_message_ids dictionary
-    if message_id not in verifier_group_message_ids:
-        verifier_group_message_ids[message_id] = {}
-
-    # Use the file_id to get the photo
-    photo_file = bot.get_file(photo)
-
-    # Retry logic
-    for attempt in range(3):  # Try 3 times
-        try:
-            photo_bytes = bot.download_file(photo_file.file_path)
-            break  # Exit loop if successful
-        except requests.exceptions.ConnectionError:
-            if attempt < 2:  # If not the last attempt
-                time.sleep(1)  # Delay before retrying
-            else:
-                bot.reply_to(
-                    message, "Failed to download the photo. Please try again later."
-                )
-                return
-
-    # Open the image using PIL directly from bytes
-    image = Image.open(io.BytesIO(photo_bytes))
-
-    # Call the function to blur sensitive info
-    processed_image = detect_and_blur_sensitive_info(image)
-
-    # Save the processed image to a BytesIO object
-    img_byte_arr = io.BytesIO()
-    processed_image.save(img_byte_arr, format="JPEG")
-    img_byte_arr.seek(0)
 
     keyboard = InlineKeyboardMarkup()
     received_btn = InlineKeyboardButton(
@@ -283,19 +261,83 @@ def handle_image(message):
     keyboard.add(received_btn)
     keyboard.add(nreceived_btn)
 
-    # Send the processed photo to all verifier groups
+    # Track the message IDs in verifier groups for this original message
+    verifier_group_message_ids[message_id] = {}
+
+    # Send the photo to all verifier groups and store the message IDs
     for group_id in verifier_group_ids:
-        try:
-            send_message = bot.send_photo(
-                group_id,
-                img_byte_arr.getvalue(),  # Use the byte array of the processed image
-                caption="Please verify the payment.",
-                reply_markup=keyboard,
-            )
-            # Store the message_id in the verifier_group_message_ids dictionary
-            verifier_group_message_ids[message_id][group_id] = send_message.message_id
-        except Exception as e:
-            logger.error(f"Error sending message to group {group_id}: {e}")
+        send_message = bot.send_photo(
+            group_id,
+            photo,
+            caption="Please verify the payment.",
+            reply_markup=keyboard,
+        )
+        # Append the sent message ID to the list for this group, for this specific receipt
+        verifier_group_message_ids[message_id][group_id] = send_message.message_id
+
+
+# this function is for bluring
+# def handle_image(message):
+#     chat_id = message.chat.id
+#     photo = message.photo[-1].file_id  # Get the highest resolution photo
+#     message_id = message.message_id  # ID of the original message
+#
+#     # Ensure the message_id key is initialized in the verifier_group_message_ids dictionary
+#     if message_id not in verifier_group_message_ids:
+#         verifier_group_message_ids[message_id] = {}
+#
+#     # Use the file_id to get the photo
+#     photo_file = bot.get_file(photo)
+#
+#     # Retry logic
+#     for attempt in range(3):  # Try 3 times
+#         try:
+#             photo_bytes = bot.download_file(photo_file.file_path)
+#             break  # Exit loop if successful
+#         except requests.exceptions.ConnectionError:
+#             if attempt < 2:  # If not the last attempt
+#                 time.sleep(1)  # Delay before retrying
+#             else:
+#                 bot.reply_to(
+#                     message, "Failed to download the photo. Please try again later."
+#                 )
+#                 return
+#
+#     # Open the image using PIL directly from bytes
+#     image = Image.open(io.BytesIO(photo_bytes))
+#
+#     # Call the function to blur sensitive info
+#     processed_image = detect_and_blur_sensitive_info(image)
+#
+#     # Save the processed image to a BytesIO object
+#     img_byte_arr = io.BytesIO()
+#     processed_image.save(img_byte_arr, format="JPEG")
+#     img_byte_arr.seek(0)
+#
+#     keyboard = InlineKeyboardMarkup()
+#     received_btn = InlineKeyboardButton(
+#         text="Received 👍", callback_data=f"received|{chat_id}|{message_id}"
+#     )
+#     nreceived_btn = InlineKeyboardButton(
+#         text="Not Received 👎", callback_data=f"nreceived|{chat_id}|{message_id}"
+#     )
+#     keyboard.add(received_btn)
+#     keyboard.add(nreceived_btn)
+#
+#     # Send the processed photo to all verifier groups
+#     for group_id in verifier_group_ids:
+#         try:
+#             send_message = bot.send_photo(
+#                 group_id,
+#                 img_byte_arr.getvalue(),  # Use the byte array of the processed image
+#                 caption="Please verify the payment.",
+#                 reply_markup=keyboard,
+#             )
+#             # Store the message_id in the verifier_group_message_ids dictionary
+#             verifier_group_message_ids[message_id][group_id] = send_message.message_id
+#         except Exception as e:
+#             logger.error(f"Error sending message to group {group_id}: {e}")
+#
 
 
 # Handle the button click with callback_data
