@@ -7,7 +7,7 @@ readme = "README.md"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = ">=3.9,<4.0"
 supabase = "2.4.3"
 annotated-types = "0.6.0"
 anyio = "4.3.0"
@@ -40,3 +40,4 @@ pytesseract = "^0.3.13"
 pillow = "^10.4.0"
 opencv-python = "^4.10.0.84"
 fastapi = "^0.115.11"
+uvicorn = "^0.34.0"
