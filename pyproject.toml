@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["4rjunc <arjunmundamani@gmail.com>"]
 description = "telegram bot to verify payments"
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -38,3 +39,4 @@ websockets = "12.0"
 pytesseract = "^0.3.13"
 pillow = "^10.4.0"
 opencv-python = "^4.10.0.84"
+fastapi = "^0.115.11"
