@@ -405,14 +405,19 @@ def handle_callback_query(call):
         )
 
 
-bot.enable_save_next_step_handlers(delay=2)
+# Main function to start the bot
+def start_bot():
+    bot.enable_save_next_step_handlers(delay=2)
 
-# Load next step handlers from the save file
-bot.load_next_step_handlers()
+    # Load next step handlers from the save file
+    bot.load_next_step_handlers()
 
-# Logging bot start
-logger.info("Bot started and polling...")
+    # Logging bot start
+    logger.info("Bot started and polling...")
 
-# Start polling (infinite loop to keep the bot running)
-# bot.infinity_polling(allowed_updates=update_types) # for welcome messages
-bot.infinity_polling()
+    # Start polling (infinite loop to keep the bot running)
+    # bot.infinity_polling(allowed_updates=update_types) # for welcome messages
+    bot.infinity_polling()
+
+if __name__ == "__main__":
+    start_bot()
