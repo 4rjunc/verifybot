@@ -39,3 +39,5 @@ create a `.env` file in root directory
 ```bash
 python3 main.py
 ```
+
+poetry run python main.py
