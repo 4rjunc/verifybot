@@ -270,7 +270,7 @@ def handle_photo(message):
             group_id,
             photo,
             caption="Please verify the payment.",
-            reply_markup=keyboard,
+            #reply_markup=keyboard,
         )
         # Append the sent message ID to the list for this group, for this specific receipt
         verifier_group_message_ids[message_id][group_id] = send_message.message_id
