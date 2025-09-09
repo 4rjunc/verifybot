@@ -251,15 +251,15 @@ def handle_photo(message):
     photo = message.photo[-1].file_id  # Get the highest resolution photo
     message_id = message.message_id  # ID of the original message
 
-    keyboard = InlineKeyboardMarkup()
-    received_btn = InlineKeyboardButton(
-        text="Received 👍", callback_data=f"received|{chat_id}|{message_id}"
-    )
-    nreceived_btn = InlineKeyboardButton(
-        text="Not Received 👎", callback_data=f"nreceived|{chat_id}|{message_id}"
-    )
-    keyboard.add(received_btn)
-    keyboard.add(nreceived_btn)
+    # keyboard = InlineKeyboardMarkup()
+    # received_btn = InlineKeyboardButton(
+    #     text="Received 👍", callback_data=f"received|{chat_id}|{message_id}"
+    # )
+    # nreceived_btn = InlineKeyboardButton(
+    #     text="Not Received 👎", callback_data=f"nreceived|{chat_id}|{message_id}"
+    # )
+    # keyboard.add(received_btn)
+    # keyboard.add(nreceived_btn)
 
     # Track the message IDs in verifier groups for this original message
     verifier_group_message_ids[message_id] = {}
